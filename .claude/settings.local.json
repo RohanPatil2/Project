@@ -23,7 +23,12 @@
       "Bash(~/slam_uncertainty_ws/TEST_FIX.sh)",
       "Bash(git config:*)",
       "Bash(git add:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(git push:*)",
+      "Bash(curl -H \"Authorization: token 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\" https://api.github.com/user)",
+      "Bash(curl -H \"Authorization: token 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\" https://api.github.com/repos/RohanPatil2/uncertainty-aware-slam)"
     ],
     "deny": [],
     "ask": []
