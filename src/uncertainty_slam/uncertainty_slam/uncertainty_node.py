@@ -6,7 +6,8 @@ This node provides cell-wise uncertainty quantification for SLAM:
 1. Subscribes to occupancy grid updates
 2. Tracks per-cell variance over time
 3. Computes Shannon entropy from variance
-4. Publishes real-time entropy heat-map
+4. Publishes real-time entropy heat-map (OccupancyGrid)
+5. Publishes color heatmap image for RViz visualization
 
 Compatible with SLAM Toolbox and other SLAM systems.
 
@@ -16,9 +17,12 @@ Author: Rohan Upendra Patil
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
+from sensor_msgs.msg import Image
 from std_msgs.msg import Float64
 import numpy as np
 import threading
+import cv2
+from cv_bridge import CvBridge
 
 
 class UncertaintySLAMNode(Node):
@@ -36,12 +40,14 @@ class UncertaintySLAMNode(Node):
         self.declare_parameter('entropy_publish_rate', 10.0)  # Hz, >= 10 Hz target
         self.declare_parameter('map_topic', '/map')
         self.declare_parameter('entropy_grid_topic', '/entropy_map')
+        self.declare_parameter('entropy_image_topic', '/entropy_heatmap_image')
         self.declare_parameter('min_observations', 10)  # Minimum cells before publishing
 
         # Get parameters
         self.entropy_rate = self.get_parameter('entropy_publish_rate').value
         map_topic = self.get_parameter('map_topic').value
         entropy_grid_topic = self.get_parameter('entropy_grid_topic').value
+        entropy_image_topic = self.get_parameter('entropy_image_topic').value
         self.min_observations = self.get_parameter('min_observations').value
 
         # Initialize data structures
@@ -53,6 +59,9 @@ class UncertaintySLAMNode(Node):
         self.cell_hit_counts = None  # Track observation counts per cell
         self.cell_sum = None  # Sum of observations
         self.cell_sum_sq = None  # Sum of squared observations
+
+        # CV Bridge for image conversion
+        self.cv_bridge = CvBridge()
 
         # Subscribers
         self.map_sub = self.create_subscription(
@@ -66,6 +75,12 @@ class UncertaintySLAMNode(Node):
         self.entropy_grid_pub = self.create_publisher(
             OccupancyGrid,
             entropy_grid_topic,
+            10
+        )
+
+        self.entropy_image_pub = self.create_publisher(
+            Image,
+            entropy_image_topic,
             10
         )
 
@@ -87,6 +102,7 @@ class UncertaintySLAMNode(Node):
 
         self.get_logger().info('Uncertainty SLAM Node initialized')
         self.get_logger().info(f'Publishing entropy grid at {self.entropy_rate} Hz')
+        self.get_logger().info(f'Publishing entropy heatmap image at {self.entropy_rate} Hz')
 
     def map_callback(self, msg):
         """
@@ -215,12 +231,47 @@ class UncertaintySLAMNode(Node):
 
         return entropy
 
+    def _create_entropy_heatmap_image(self, entropy, width, height):
+        """
+        Convert entropy array to a color heatmap image using cv2.applyColorMap.
+
+        Args:
+            entropy: 1D numpy array of entropy values [0, 1]
+            width: Map width in cells
+            height: Map height in cells
+
+        Returns:
+            sensor_msgs.msg.Image: Color heatmap image message
+        """
+        # Reshape to 2D grid
+        entropy_2d = entropy.reshape((height, width))
+
+        # Normalize to 0-255 and convert to uint8
+        entropy_normalized = np.clip(entropy_2d * 255.0, 0, 255).astype(np.uint8)
+
+        # Apply JET colormap (blue=low, red=high)
+        # Note: OpenCV uses BGR format
+        entropy_color = cv2.applyColorMap(entropy_normalized, cv2.COLORMAP_JET)
+
+        # Convert BGR to RGB for proper RViz display
+        entropy_color_rgb = cv2.cvtColor(entropy_color, cv2.COLOR_BGR2RGB)
+
+        # Convert to ROS Image message
+        try:
+            image_msg = self.cv_bridge.cv2_to_imgmsg(entropy_color_rgb, encoding='rgb8')
+            image_msg.header.stamp = self.get_clock().now().to_msg()
+            image_msg.header.frame_id = 'map'
+            return image_msg
+        except Exception as e:
+            self.get_logger().error(f'Failed to convert entropy to image: {e}')
+            return None
+
     def compute_and_publish_entropy(self):
         """
         Main entropy computation routine.
 
         Computes cell-wise Shannon entropy from particle variance and
-        publishes as an OccupancyGrid message for visualization.
+        publishes as both an OccupancyGrid message and a color Image message.
         """
         with self.map_lock:
             if self.current_map is None:
@@ -241,6 +292,10 @@ class UncertaintySLAMNode(Node):
             variance = self._compute_cell_variance()
             entropy = self._variance_to_shannon_entropy(variance)
 
+            # Get map dimensions
+            width = self.current_map.info.width
+            height = self.current_map.info.height
+
             # Create entropy grid message
             entropy_msg = OccupancyGrid()
             entropy_msg.header = self.current_map.header
@@ -254,6 +309,11 @@ class UncertaintySLAMNode(Node):
 
             # Publish entropy grid
             self.entropy_grid_pub.publish(entropy_msg)
+
+            # Create and publish color heatmap image
+            heatmap_image = self._create_entropy_heatmap_image(entropy, width, height)
+            if heatmap_image is not None:
+                self.entropy_image_pub.publish(heatmap_image)
 
             # Publish statistics
             avg_entropy = Float64()

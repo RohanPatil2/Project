@@ -6,7 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /OccupancyGrid1
-        - /EntropyMap1
+        - /EntropyHeatmap1
       Splitter Ratio: 0.5
     Tree Height: 623
   - Class: rviz_common/Selection
@@ -64,12 +64,12 @@ Visualization Manager:
         Value: /map_updates
       Use Timestamp: false
       Value: true
-    - Alpha: 0.800000011920929
+    - Alpha: 0.75
       Class: rviz_default_plugins/Map
-      Color Scheme: costmap
-      Draw Behind: false
+      Color Scheme: raw
+      Draw Behind: true
       Enabled: true
-      Name: EntropyMap
+      Name: EntropyHeatmap
       Topic:
         Depth: 5
         Durability Policy: Volatile
