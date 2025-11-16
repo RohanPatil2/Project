@@ -11,6 +11,7 @@ from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from ament_index_python.packages import get_package_share_directory
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile
 import os
 
 
@@ -96,15 +97,13 @@ def generate_launch_description():
             name='slam_toolbox',
             output='screen',
             parameters=[
-                slam_params_file if os.path.exists(slam_params_file) else {},
+                slam_params_file,
                 {
                     'use_sim_time': False,
-                    'odom_frame': 'odom',
-                    'map_frame': 'map',
-                    'base_frame': 'base_footprint',
-                    'scan_topic': '/scan',
-                    'mode': 'mapping',
                 }
+            ],
+            remappings=[
+                ('/scan', '/scan'),
             ]
         ),
 
@@ -118,8 +117,8 @@ def generate_launch_description():
                 'use_sim_time': False,
                 'map_topic': '/map',
                 'entropy_map_topic': '/entropy_map',
-                'publish_rate': 10.0,
-                'min_observations': 10,
+                'entropy_publish_rate': 10.0,  # Match parameter name in code
+                'min_observations': 5,  # Reduced for faster initial display (was 10)
             }]
         ),
 

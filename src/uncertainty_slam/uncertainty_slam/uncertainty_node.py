@@ -63,19 +63,29 @@ class UncertaintySLAMNode(Node):
         # CV Bridge for image conversion
         self.cv_bridge = CvBridge()
 
+        # QoS Profile for map topics (match SLAM Toolbox settings)
+        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
+        
+        map_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10,
+            durability=QoSDurabilityPolicy.VOLATILE
+        )
+        
         # Subscribers
         self.map_sub = self.create_subscription(
             OccupancyGrid,
             map_topic,
             self.map_callback,
-            10
+            map_qos
         )
 
         # Publishers
         self.entropy_grid_pub = self.create_publisher(
             OccupancyGrid,
             entropy_grid_topic,
-            10
+            map_qos
         )
 
         self.entropy_image_pub = self.create_publisher(

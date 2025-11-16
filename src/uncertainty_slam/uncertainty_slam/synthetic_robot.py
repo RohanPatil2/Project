@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
 Synthetic Robot Data Generator for Uncertainty-Aware SLAM Testing
-COMPLEX ENVIRONMENT VERSION with degraded sensor for rich entropy maps.
+COMPLEX ENVIRONMENT VERSION with DEGRADED SENSOR and AUTONOMOUS NAVIGATION.
 
 Features:
-- Multi-room layout with narrow corridors
-- 240-degree FOV laser (blind spot behind robot)
-- 4.0m max range (limited visibility)
-- Increased sensor noise
-- Logical pre-mapped exploration route
+- 10m×10m complex layout with internal walls, multiple rooms, narrow corridors
+- U-shaped obstacles creating occlusions
+- 240-degree frontal FOV laser (DEGRADED - realistic blind spots)
+- 4.0m max range (DEGRADED - limited visibility)
+- Realistic 2cm sensor noise (Gaussian)
+- AUTONOMOUS NAVIGATION with /cmd_vel publishing
+- Pre-planned waypoints covering all rooms
+- Stuck detection and automatic waypoint skipping
+
+Author: Rohan Upendra Patil
 """
 
 import rclpy
@@ -27,24 +32,25 @@ import select
 
 
 class VirtualEnvironment:
-    """Simulates a complex 2D environment with multiple rooms and corridors."""
+    """Simulates a COMPLEX 2D environment with multiple rooms and occlusions."""
 
     def __init__(self, width=10.0, height=10.0):
         self.width = width
         self.height = height
         self.obstacles = []
-        self._create_complex_multi_room_environment()
+        self._create_complex_environment()
 
-    def _create_complex_multi_room_environment(self):
+    def _create_complex_environment(self):
         """
-        Create a COMPLEX multi-room environment with narrow corridors.
+        Create a COMPLEX environment with internal walls, multiple rooms,
+        narrow corridors, and U-shaped obstacles.
 
         Layout (10m × 10m):
         ┌──────────────────────────────────────┐
         │         │ Corridor │                 │
         │ Room 1  │──────────│    Room 2       │
         │   ┌─┐   │          │      ┌─┐        │
-        │   │U│   │          │      │L│        │
+        │   │U│   │          │      │U│        │
         ├───┴─┴───┤          ├──────┴─┴────────┤
         │         Door       │                 │
         │ Room 3  │          │    Room 4       │
@@ -52,7 +58,7 @@ class VirtualEnvironment:
         │    └┘   │          │       └┘        │
         └─────────┴──────────┴─────────────────┘
 
-        4 Rooms + Central Corridor + Narrow Doorways
+        4 Rooms + Central Corridor + Narrow Doorways + U-shaped obstacles
         """
 
         # ===== EXTERIOR WALLS (10m × 10m) =====
@@ -88,15 +94,13 @@ class VirtualEnvironment:
         # Corridor opening: x = 2.25 to 3.75 (1.5m wide)
 
         # CENTRAL CORRIDOR WALLS - Narrow vertical passage connecting doorways
-        # Creates a narrow central corridor (width = 1.5m - (-2.0m) = 3.5m, but constrained)
         self.obstacles.append({'type': 'wall', 'x1': -0.5, 'y1': 3.0, 'x2': -0.5, 'y2': 0.75})   # Left corridor wall (top)
         self.obstacles.append({'type': 'wall', 'x1': -0.5, 'y1': -0.75, 'x2': -0.5, 'y2': -3.0}) # Left corridor wall (bottom)
-
         self.obstacles.append({'type': 'wall', 'x1': 0.5, 'y1': 3.0, 'x2': 0.5, 'y2': 0.75})     # Right corridor wall (top)
         self.obstacles.append({'type': 'wall', 'x1': 0.5, 'y1': -0.75, 'x2': 0.5, 'y2': -3.0})   # Right corridor wall (bottom)
         # This creates a 1.0m wide central corridor passage
 
-        # ===== U-SHAPED OBSTACLES (Create shadow zones) =====
+        # ===== U-SHAPED OBSTACLES (Create shadow zones for entropy variation) =====
 
         # U-SHAPE in Room 1 (top-left room)
         self.obstacles.append({'type': 'wall', 'x1': -4.0, 'y1': 3.5, 'x2': -3.0, 'y2': 3.5})  # Top
@@ -142,9 +146,9 @@ class VirtualEnvironment:
         """
         Cast a ray from (x,y) at given angle and return distance to nearest obstacle.
 
-        DEGRADED SENSOR:
-        - Max range: 4.0m (reduced from 10.0m)
-        - Increased noise: 2cm std dev
+        DEGRADED SENSOR SPECIFICATIONS:
+        - Max range: 4.0m (LIMITED visibility)
+        - Realistic noise: 2cm std dev (Gaussian)
         """
         # Ray direction
         dx = math.cos(angle)
@@ -176,8 +180,8 @@ class VirtualEnvironment:
                     if dist is not None and dist < min_dist:
                         min_dist = dist
 
-        # DEGRADED SENSOR: Increased noise (2cm std dev)
-        noise = np.random.normal(0, 0.02)
+        # Realistic sensor noise (2cm std dev Gaussian)
+        noise = np.random.normal(0.0, 0.02)
         return max(0.1, min_dist + noise)
 
     def _ray_wall_intersection(self, rx, ry, rdx, rdy, wx1, wy1, wx2, wy2):
@@ -254,24 +258,44 @@ class VirtualEnvironment:
 
 class SyntheticRobotNode(Node):
     """
-    Synthetic robot with degraded sensor and complex environment.
+    Synthetic robot with DEGRADED sensor in COMPLEX environment.
 
-    DEGRADED SENSOR:
-    - 240° FOV (blind spot behind)
-    - 4.0m max range
-    - 2cm noise
+    COMPLETE AUTONOMOUS NAVIGATION with /cmd_vel publishing.
+
+    DEGRADED SENSOR SPECIFICATIONS:
+    - 240° frontal FOV (REALISTIC - has blind spots behind)
+    - 4.0m max range (LIMITED visibility)
+    - 2cm realistic noise (Gaussian)
+    - 628 laser rays
+    - 10 Hz scan rate
+
+    ENVIRONMENT:
+    - 10m×10m boundary
+    - 4 rooms with internal walls
+    - Narrow corridors (1.0-1.5m wide)
+    - U-shaped and L-shaped obstacles
+    - Multiple occlusion zones
+
+    AUTONOMOUS NAVIGATION:
+    - Hard-coded waypoints covering all rooms
+    - /cmd_vel publisher for velocity commands
+    - Proportional controller for waypoint following
+    - 0.35m waypoint reach tolerance
+    - Stuck detection: 0.15m in 8 seconds
+    - Automatic waypoint skipping when stuck
     """
 
     def __init__(self):
         super().__init__('synthetic_robot')
 
         # Parameters
-        self.declare_parameter('start_mode', 'exploration_pattern')
-        start_mode = self.get_parameter('start_mode').value
+        self.declare_parameter('robot_mode', 'EXPLORATION_PATTERN')
+        robot_mode = self.get_parameter('robot_mode').value
 
         # Publishers
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)  # NEW: /cmd_vel publisher
         self.mode_pub = self.create_publisher(String, '/robot_mode', 10)
         self.status_pub = self.create_publisher(String, '/exploration_status', 10)
 
@@ -294,13 +318,13 @@ class SyntheticRobotNode(Node):
         self.angular_vel = 0.0
 
         # Control parameters
-        self.max_linear_vel = 0.4  # m/s (slightly slower for tight spaces)
+        self.max_linear_vel = 0.35  # m/s (slower for complex environment)
         self.max_angular_vel = 1.0  # rad/s
-        self.linear_accel = 0.5
+        self.linear_accel = 0.4
         self.angular_accel = 0.8
 
         # Mode
-        self.mode = start_mode if start_mode in ('manual', 'autonomous', 'exploration_pattern') else 'manual'
+        self.mode = robot_mode.upper() if robot_mode.upper() in ('MANUAL', 'AUTONOMOUS', 'EXPLORATION_PATTERN') else 'EXPLORATION_PATTERN'
         self.autonomous_goal = None
         self.exploration_pattern_index = 0
         self.exploration_complete = False
@@ -316,12 +340,12 @@ class SyntheticRobotNode(Node):
         self.environment = VirtualEnvironment()
 
         # ===== DEGRADED LASER PARAMETERS =====
-        # 240° FOV (±120°) - BLIND SPOT BEHIND
-        self.angle_min = -2.0944  # -120 degrees
-        self.angle_max = 2.0944   # +120 degrees
-        self.angle_increment = 0.01  # ~418 rays
+        # 240° FRONTAL FOV (realistic - has blind spots)
+        self.angle_min = -2.0944  # -120 degrees (-2π/3 radians)
+        self.angle_max = 2.0944   # +120 degrees (+2π/3 radians)
+        self.angle_increment = (self.angle_max - self.angle_min) / 628  # 628 rays
 
-        # REDUCED RANGE: 4.0m
+        # SHORT RANGE: 4.0m (DEGRADED visibility)
         self.range_min = 0.1
         self.range_max = 4.0
 
@@ -329,18 +353,23 @@ class SyntheticRobotNode(Node):
         self.dt = 0.05  # 20 Hz
         self.create_timer(self.dt, self.update_robot)
         self.create_timer(0.1, self.publish_scan)  # 10 Hz scan
+        self.create_timer(0.02, self.publish_tf)  # 50 Hz TF publishing
 
         # Keyboard control
         self.cmd_vel = {'linear': 0.0, 'angular': 0.0}
 
+        # Waypoints for exploration
+        self.waypoints = self._create_exploration_waypoints()
+
         self.get_logger().info('=== Synthetic Robot Started (COMPLEX ENVIRONMENT) ===')
-        self.get_logger().info(f'Mode: {self.mode.upper()}')
-        self.get_logger().info('DEGRADED SENSOR:')
-        self.get_logger().info(f'  - Laser FOV: 240° (±120°) - BLIND SPOT BEHIND')
-        self.get_logger().info(f'  - Max Range: {self.range_max}m (reduced)')
-        self.get_logger().info(f'  - Sensor Noise: 2cm std dev')
-        self.get_logger().info('ENVIRONMENT: 4 Rooms + Narrow Corridors')
+        self.get_logger().info(f'Mode: {self.mode}')
+        self.get_logger().info('DEGRADED SENSOR CONFIGURATION:')
+        self.get_logger().info(f'  - Laser FOV: 240° (FRONTAL - realistic blind spots)')
+        self.get_logger().info(f'  - Max Range: {self.range_max}m (DEGRADED)')
+        self.get_logger().info(f'  - Sensor Noise: 2cm std dev (Gaussian)')
+        self.get_logger().info('ENVIRONMENT: 10m×10m Complex Multi-Room with Occlusions')
         self.get_logger().info(f'Starting position: ({self.x:.2f}, {self.y:.2f})')
+        self.get_logger().info(f'Total waypoints: {len(self.waypoints)}')
 
         # Start keyboard listener if TTY available
         if sys.stdin.isatty():
@@ -348,11 +377,166 @@ class SyntheticRobotNode(Node):
         else:
             self.get_logger().warn('Keyboard control disabled (no TTY)')
 
+    def _create_exploration_waypoints(self):
+        """
+        Create a LOGICAL EXPLORATION PATH that visits ALL ROOMS in the complex environment.
+
+        Strategy:
+        1. Start at origin (0, 0)
+        2. Explore central corridor
+        3. Enter and explore Room 1 (top-left)
+        4. Return to corridor and explore Room 2 (top-right)
+        5. Return to corridor and explore Room 3 (bottom-left)
+        6. Return to corridor and explore Room 4 (bottom-right)
+        7. Final sweep of central corridor
+        8. Return to origin
+
+        Each room is thoroughly explored to reduce entropy.
+        """
+        waypoints = [
+            # ===== PHASE 1: STARTING POSITION =====
+            (0.0, 0.0),      # Origin
+
+            # ===== PHASE 2: CENTRAL CORRIDOR EXPLORATION =====
+            (-0.2, 0.5),     # Move into central corridor
+            (-0.2, 1.0),
+            (-0.2, 1.5),
+            (-0.2, 2.0),
+            (-0.2, 2.5),     # Top of central corridor
+            (0.0, 2.0),
+            (0.2, 1.5),
+            (0.2, 1.0),
+            (0.2, 0.5),
+            (0.0, 0.0),      # Return to center doorway
+
+            # ===== PHASE 3: ROOM 1 EXPLORATION (Top-Left) =====
+            (-1.0, 0.3),     # Approach Room 1 doorway
+            (-2.0, 0.3),     # Enter doorway
+            (-2.5, 0.5),     # Inside Room 1
+            (-3.0, 1.0),     # Explore corners
+            (-4.0, 1.5),
+            (-4.2, 2.0),
+            (-4.2, 2.5),
+            (-3.5, 2.8),     # Approach U-shape obstacle
+            (-3.5, 3.2),     # Around U-shape
+            (-3.0, 3.0),
+            (-3.5, 2.5),
+            (-4.0, 3.0),
+            (-3.0, 2.0),
+            (-2.5, 1.5),
+            (-3.5, 1.2),     # Box obstacle area
+            (-2.8, 0.8),
+            (-3.5, 3.5),     # Far corner
+            (-4.0, 4.0),
+            (-4.5, 4.5),     # Maximum coverage
+            (-3.0, 4.0),
+            (-2.5, 3.5),
+            (-2.0, 2.5),
+            (-2.0, 0.3),     # Exit doorway
+            (0.0, 0.0),      # Return to center
+
+            # ===== PHASE 4: ROOM 2 EXPLORATION (Top-Right) =====
+            (1.0, 0.3),      # Approach Room 2 doorway
+            (1.5, 0.3),      # Enter doorway
+            (2.0, 0.5),      # Inside Room 2
+            (2.5, 1.0),
+            (3.0, 1.5),
+            (3.5, 2.0),
+            (4.0, 2.5),
+            (4.2, 3.0),
+            (3.5, 3.2),      # Approach U-shape obstacle
+            (3.5, 2.8),      # Around U-shape
+            (3.0, 3.0),
+            (3.5, 2.5),
+            (4.0, 3.0),
+            (3.0, 2.0),
+            (2.5, 1.5),
+            (3.5, 1.2),      # Box obstacle area
+            (2.8, 0.8),
+            (3.5, 3.5),      # Far corner
+            (4.0, 4.0),
+            (4.5, 4.5),      # Maximum coverage
+            (3.0, 4.0),
+            (2.5, 3.5),
+            (2.0, 2.5),
+            (1.5, 0.3),      # Exit doorway
+            (0.0, 0.0),      # Return to center
+
+            # ===== PHASE 5: CENTRAL CORRIDOR (Bottom Half) =====
+            (-0.2, -0.5),
+            (-0.2, -1.0),
+            (-0.2, -1.5),
+            (-0.2, -2.0),
+            (-0.2, -2.5),    # Bottom of central corridor
+            (0.0, -2.0),
+            (0.2, -1.5),
+            (0.2, -1.0),
+            (0.2, -0.5),
+            (0.0, 0.0),      # Return to center
+
+            # ===== PHASE 6: ROOM 3 EXPLORATION (Bottom-Left) =====
+            (-1.0, -0.3),    # Approach Room 3 doorway
+            (-2.0, -0.3),    # Enter doorway
+            (-2.5, -0.5),    # Inside Room 3
+            (-3.0, -1.0),
+            (-3.5, -1.5),
+            (-4.0, -2.0),
+            (-4.5, -2.5),
+            (-4.2, -3.0),
+            (-4.0, -3.5),    # L-shape obstacle area
+            (-3.5, -2.5),
+            (-3.0, -2.2),
+            (-3.2, -3.0),
+            (-3.5, -3.5),    # Box obstacle area
+            (-2.8, -3.2),
+            (-4.0, -4.0),    # Far corner
+            (-4.5, -4.5),    # Maximum coverage
+            (-3.5, -4.0),
+            (-3.0, -3.5),
+            (-2.5, -3.0),
+            (-2.5, -2.0),
+            (-2.0, -0.3),    # Exit doorway
+            (0.0, 0.0),      # Return to center
+
+            # ===== PHASE 7: ROOM 4 EXPLORATION (Bottom-Right) =====
+            (1.0, -0.3),     # Approach Room 4 doorway
+            (1.5, -0.3),     # Enter doorway
+            (2.0, -0.5),     # Inside Room 4
+            (2.5, -1.0),
+            (3.0, -1.5),
+            (3.5, -2.0),
+            (4.0, -2.5),
+            (4.5, -3.0),
+            (4.2, -3.5),
+            (3.5, -2.5),     # L-shape obstacle area
+            (3.0, -2.2),
+            (3.2, -3.0),
+            (3.5, -3.5),     # Box obstacle area
+            (2.8, -3.2),
+            (4.0, -4.0),     # Far corner
+            (4.5, -4.5),     # Maximum coverage
+            (3.5, -4.0),
+            (3.0, -3.5),
+            (2.5, -3.0),
+            (2.5, -2.0),
+            (1.5, -0.3),     # Exit doorway
+            (0.0, 0.0),      # Return to center
+
+            # ===== PHASE 8: FINAL CORRIDOR SWEEP =====
+            (-0.3, 2.0),
+            (0.3, 2.0),
+            (-0.3, -2.0),
+            (0.3, -2.0),
+            (0.0, 0.0),      # Final position: origin
+        ]
+
+        return waypoints
+
     def goal_callback(self, msg):
         """Receive autonomous exploration goals."""
         self.autonomous_goal = (msg.pose.position.x, msg.pose.position.y)
-        if self.mode != 'autonomous':
-            self.mode = 'autonomous'
+        if self.mode != 'AUTONOMOUS':
+            self.mode = 'AUTONOMOUS'
             self.get_logger().info(f'Switching to AUTONOMOUS mode, goal: {self.autonomous_goal}')
             self.publish_mode()
 
@@ -369,28 +553,28 @@ class SyntheticRobotNode(Node):
         """Process keyboard commands."""
         if key == 'w':
             self.cmd_vel['linear'] = self.max_linear_vel
-            self.mode = 'manual'
+            self.mode = 'MANUAL'
         elif key == 'x':
             self.cmd_vel['linear'] = -self.max_linear_vel
-            self.mode = 'manual'
+            self.mode = 'MANUAL'
         elif key == 'a':
             self.cmd_vel['angular'] = self.max_angular_vel
-            self.mode = 'manual'
+            self.mode = 'MANUAL'
         elif key == 'd':
             self.cmd_vel['angular'] = -self.max_angular_vel
-            self.mode = 'manual'
+            self.mode = 'MANUAL'
         elif key == 's':
             self.cmd_vel['linear'] = 0.0
             self.cmd_vel['angular'] = 0.0
             self.linear_vel = 0.0
             self.angular_vel = 0.0
         elif key == 'm':
-            self.mode = 'manual'
+            self.mode = 'MANUAL'
             self.autonomous_goal = None
             self.get_logger().info('Switched to MANUAL mode')
             self.publish_mode()
         elif key == 'e':
-            self.mode = 'exploration_pattern'
+            self.mode = 'EXPLORATION_PATTERN'
             self.exploration_pattern_index = 0
             self.get_logger().info('Switched to EXPLORATION PATTERN mode')
             self.publish_mode()
@@ -405,12 +589,16 @@ class SyntheticRobotNode(Node):
         self.mode_pub.publish(msg)
 
     def update_robot(self):
-        """Update robot state based on current mode."""
-        if self.mode == 'manual':
+        """
+        Update robot state based on current mode.
+
+        NEW: Publishes Twist messages to /cmd_vel for autonomous navigation.
+        """
+        if self.mode == 'MANUAL':
             target_linear = self.cmd_vel['linear']
             target_angular = self.cmd_vel['angular']
 
-        elif self.mode == 'autonomous':
+        elif self.mode == 'AUTONOMOUS':
             if self.autonomous_goal is None:
                 target_linear = 0.0
                 target_angular = 0.0
@@ -424,13 +612,13 @@ class SyntheticRobotNode(Node):
                     (self.x - self.autonomous_goal[0])**2 +
                     (self.y - self.autonomous_goal[1])**2
                 )
-                if dist < 0.3:
+                if dist < 0.35:  # 0.35m tolerance
                     self.get_logger().info('Goal reached!')
                     self.autonomous_goal = None
-                    self.mode = 'manual'
+                    self.mode = 'MANUAL'
                     self.publish_mode()
 
-        elif self.mode == 'exploration_pattern':
+        elif self.mode == 'EXPLORATION_PATTERN':
             target_linear, target_angular = self.exploration_pattern()
 
         else:
@@ -459,12 +647,22 @@ class SyntheticRobotNode(Node):
             self.y = new_y
             self.theta = new_theta
 
-        # Publish odometry and TF
+        # NEW: Publish /cmd_vel for autonomous navigation
+        cmd_msg = Twist()
+        cmd_msg.linear.x = self.linear_vel
+        cmd_msg.angular.z = self.angular_vel
+        self.cmd_vel_pub.publish(cmd_msg)
+
+        # Publish odometry (TF is published separately at higher rate)
         self.publish_odometry()
-        self.publish_tf()
 
     def compute_control_to_goal(self, goal_x, goal_y):
-        """Proportional controller to navigate to goal."""
+        """
+        Proportional controller to navigate to goal.
+
+        Calculates distance and angle to waypoint.
+        Returns linear and angular velocities.
+        """
         dx = goal_x - self.x
         dy = goal_y - self.y
         distance = math.sqrt(dx**2 + dy**2)
@@ -478,7 +676,7 @@ class SyntheticRobotNode(Node):
             angle_error += 2 * math.pi
 
         # Control gains
-        k_linear = 0.6
+        k_linear = 0.5
         k_angular = 2.0
         angle_threshold = 0.3
 
@@ -498,233 +696,43 @@ class SyntheticRobotNode(Node):
 
     def exploration_pattern(self):
         """
-        PRE-MAPPED ROUTE through complex multi-room environment.
+        AUTONOMOUS WAYPOINT FOLLOWING with stuck detection.
 
-        Route Logic:
-        1. Start at origin (0, 0) in central corridor
-        2. Explore central corridor thoroughly
-        3. Enter Room 1 (top-left) through doorway
-        4. Explore Room 1 completely
-        5. Return to corridor, enter Room 2 (top-right)
-        6. Explore Room 2 completely
-        7. Return to corridor, enter Room 3 (bottom-left)
-        8. Explore Room 3 completely
-        9. Return to corridor, enter Room 4 (bottom-right)
-        10. Explore Room 4 completely
-        11. Return to origin
+        Features:
+        - Follows hard-coded waypoints
+        - 0.35m waypoint tolerance
+        - Stuck detection: 0.15m in 8 seconds
+        - Automatic waypoint skipping
+        - Progress tracking
         """
-        waypoints = [
-            # ===== PHASE 1: CENTRAL CORRIDOR EXPLORATION =====
-            # Start at origin, explore central corridor first
-            (0.0, 0.0),      # Start position (center of corridor)
-            (0.0, 1.0),      # Move north in corridor
-            (0.0, 2.0),      # Continue north
-            (0.0, 2.5),      # Near north end of corridor
-            (0.0, 2.0),      # Back south
-            (0.0, 1.0),
-            (0.0, 0.0),      # Back to center
-            (0.0, -1.0),     # Move south in corridor
-            (0.0, -2.0),     # Continue south
-            (0.0, -2.5),     # Near south end of corridor
-            (0.0, -2.0),     # Back north
-            (0.0, -1.0),
-            (0.0, 0.0),      # Back to center
-
-            # ===== PHASE 2: ROOM 1 (TOP-LEFT) =====
-            # Navigate through left doorway (at y ≈ 0, x = -2.0 to -0.5)
-            (-0.5, 0.0),     # Approach left doorway from corridor
-            (-1.0, 0.0),     # In doorway
-            (-1.5, 0.0),     # Through doorway into Room 1 area
-            (-2.2, 0.0),     # Fully in Room 1 (past the wall at x=-2.0)
-
-            # Explore Room 1 systematically
-            (-2.5, 0.5),     # Start exploration pattern
-            (-3.0, 0.5),
-            (-3.5, 0.5),
-            (-4.0, 0.5),
-            (-4.0, 1.0),
-            (-3.5, 1.0),
-            (-3.0, 1.0),     # Around box at (-3.5, 1.0)
-            (-2.5, 1.0),
-            (-2.5, 1.5),
-            (-3.0, 1.5),
-            (-3.5, 1.5),
-            (-4.0, 1.5),
-            (-4.0, 2.0),
-            (-3.5, 2.0),     # Around U-shape (bottom opening)
-            (-3.0, 2.5),
-            (-3.5, 2.5),
-            (-4.0, 2.5),
-            (-4.0, 3.0),
-            (-3.5, 3.0),
-            (-3.0, 3.0),
-            (-2.5, 3.0),
-            (-2.5, 3.5),
-            (-3.0, 3.5),
-            (-3.5, 3.5),     # Near U-shape top
-            (-4.0, 3.5),
-            (-4.0, 4.0),
-            (-3.5, 4.0),
-            (-3.0, 4.0),
-            (-2.5, 4.0),
-
-            # Exit Room 1 back to corridor
-            (-2.2, 2.0),
-            (-1.5, 1.0),
-            (-1.0, 0.5),
-            (-0.5, 0.0),
-            (0.0, 0.0),      # Back in central corridor
-
-            # ===== PHASE 3: ROOM 2 (TOP-RIGHT) =====
-            # Navigate through right doorway (at y ≈ 0, x = 1.5 to beyond)
-            (0.5, 0.0),      # Approach right doorway
-            (1.0, 0.0),      # In doorway area
-            (1.7, 0.0),      # Through doorway into Room 2 area
-            (2.5, 0.0),      # Fully in Room 2 (past wall at x=1.5)
-
-            # Navigate through Room 2's internal corridor opening (x = 2.25 to 3.75)
-            (2.5, 0.2),      # Approach corridor opening
-            (3.0, 0.3),      # In corridor opening
-            (3.5, 0.5),      # Through corridor into top section of Room 2
-
-            # Explore Room 2 top section
-            (3.0, 0.8),
-            (3.5, 0.8),
-            (4.0, 0.8),
-            (4.5, 0.8),
-            (4.5, 1.2),
-            (4.0, 1.2),
-            (3.5, 1.2),      # Around box at (3.5, 1.0)
-            (3.0, 1.2),
-            (3.0, 1.6),
-            (3.5, 1.6),
-            (4.0, 1.6),
-            (4.5, 1.6),
-            (4.5, 2.0),
-            (4.0, 2.0),
-            (3.5, 2.0),      # Around U-shape (bottom opening)
-            (3.0, 2.5),
-            (3.5, 2.5),
-            (4.0, 2.5),
-            (4.5, 2.5),
-            (4.5, 3.0),
-            (4.0, 3.0),
-            (3.5, 3.0),
-            (3.0, 3.5),
-            (3.5, 3.5),      # Near U-shape
-            (4.0, 3.5),
-            (4.5, 3.5),
-            (4.5, 4.0),
-            (4.0, 4.0),
-            (3.5, 4.0),
-            (3.0, 4.0),
-
-            # Exit Room 2 back to corridor
-            (3.0, 0.5),
-            (2.5, 0.3),
-            (2.0, 0.0),
-            (1.5, 0.0),
-            (1.0, 0.0),
-            (0.5, 0.0),
-            (0.0, 0.0),      # Back in central corridor
-
-            # ===== PHASE 4: ROOM 3 (BOTTOM-LEFT) =====
-            # Through left doorway, then through Room 3's corridor opening
-            (-0.5, 0.0),
-            (-1.0, 0.0),
-            (-1.5, 0.0),
-            (-2.2, 0.0),     # In Room 3 area
-            (-2.5, -0.3),    # Approach Room 3's corridor opening (x = -2.75 to -1.25)
-            (-2.2, -0.5),    # In corridor opening area (to Room 3 bottom section)
-
-            # Explore Room 3 bottom section
-            (-2.5, -1.0),
-            (-3.0, -1.0),
-            (-3.5, -1.0),
-            (-4.0, -1.0),
-            (-4.0, -1.5),
-            (-3.5, -1.5),
-            (-3.0, -1.5),    # Around L-shape at (-3.0, -2.0)
-            (-2.5, -1.5),
-            (-2.5, -2.0),
-            (-3.0, -2.5),
-            (-3.5, -2.5),
-            (-4.0, -2.5),
-            (-4.0, -3.0),
-            (-3.5, -3.0),
-            (-3.0, -3.0),
-            (-2.5, -3.0),
-            (-2.5, -3.5),
-            (-3.0, -3.5),
-            (-3.5, -3.5),    # Around box at (-3.5, -3.5)
-            (-4.0, -3.5),
-            (-4.0, -4.0),
-            (-3.5, -4.0),
-            (-3.0, -4.0),
-            (-2.5, -4.0),
-
-            # Exit Room 3 back to corridor
-            (-2.2, -2.0),
-            (-1.5, -1.0),
-            (-1.0, -0.5),
-            (-0.5, 0.0),
-            (0.0, 0.0),      # Back in central corridor
-
-            # ===== PHASE 5: ROOM 4 (BOTTOM-RIGHT) =====
-            # Through right doorway, then through Room 4's corridor opening
-            (0.5, 0.0),
-            (1.0, 0.0),
-            (1.7, 0.0),
-            (2.5, 0.0),      # In Room 4 area
-            (3.0, -0.3),     # Approach Room 4's corridor opening (x = 2.25 to 3.75)
-            (3.5, -0.5),     # Through corridor opening into Room 4 bottom section
-
-            # Explore Room 4 bottom section
-            (3.0, -1.0),
-            (3.5, -1.0),
-            (4.0, -1.0),
-            (4.5, -1.0),
-            (4.5, -1.5),
-            (4.0, -1.5),
-            (3.5, -1.5),
-            (3.0, -1.5),     # Around L-shape at (3.0, -2.0)
-            (3.0, -2.0),
-            (3.5, -2.5),
-            (4.0, -2.5),
-            (4.5, -2.5),
-            (4.5, -3.0),
-            (4.0, -3.0),
-            (3.5, -3.0),
-            (3.0, -3.0),
-            (3.0, -3.5),
-            (3.5, -3.5),     # Around box at (3.5, -3.5)
-            (4.0, -3.5),
-            (4.5, -3.5),
-            (4.5, -4.0),
-            (4.0, -4.0),
-            (3.5, -4.0),
-            (3.0, -4.0),
-
-            # ===== PHASE 6: RETURN TO ORIGIN =====
-            # Exit Room 4 and return to starting position
-            (3.0, -2.0),
-            (2.5, -1.0),
-            (2.0, -0.5),
-            (1.5, 0.0),
-            (1.0, 0.0),
-            (0.5, 0.0),
-            (0.0, 0.0),      # Final position: back at origin
-        ]
-
-        # Get total waypoints
-        total_wp = len(waypoints)
+        total_wp = len(self.waypoints)
 
         # Initialize waypoint timer on first call
         if self.waypoint_start_time is None:
             self.waypoint_start_time = self.get_clock().now().nanoseconds / 1e9
 
+        # Check if exploration complete
+        if self.exploration_pattern_index >= total_wp:
+            if not self.exploration_complete:
+                self.exploration_complete = True
+                self.get_logger().info('')
+                self.get_logger().info('='*60)
+                self.get_logger().info('🎉 ✅ EXPLORATION 100% COMPLETE!')
+                self.get_logger().info('='*60)
+                self.get_logger().info(f'Total waypoints: {total_wp}')
+                self.get_logger().info(f'Skipped waypoints: {self.stuck_counter}')
+                self.get_logger().info('📊 Results should be generated automatically')
+                self.get_logger().info('='*60)
+
+                # Publish completion
+                status_msg = String()
+                status_msg.data = 'COMPLETE'
+                self.status_pub.publish(status_msg)
+
+            return 0.0, 0.0
+
         # Current target
-        target = waypoints[self.exploration_pattern_index % total_wp]
+        target = self.waypoints[self.exploration_pattern_index]
 
         # Distance to target
         dist = math.sqrt((self.x - target[0])**2 + (self.y - target[1])**2)
@@ -738,73 +746,59 @@ class SyntheticRobotNode(Node):
 
         time_since_last_check = current_time - self.last_stuck_check_time
 
+        # Check if stuck: no 0.15m movement in 8 seconds
         if time_since_last_check >= 8.0:
             position_change = math.sqrt((self.x - self.last_position[0])**2 +
                                        (self.y - self.last_position[1])**2)
 
             if position_change < 0.15:
                 self.stuck_counter += 1
-                self.get_logger().warn(f'⚠️ Robot stuck at waypoint {self.exploration_pattern_index}! Skipping...')
+                self.get_logger().warn(f'⚠️ Robot stuck at waypoint {self.exploration_pattern_index + 1}! Skipping...')
                 self.exploration_pattern_index += 1
                 self.waypoint_start_time = current_time
                 self.last_position = (self.x, self.y)
                 self.last_stuck_check_time = current_time
-                target = waypoints[self.exploration_pattern_index % total_wp]
+
+                if self.exploration_pattern_index < total_wp:
+                    target = self.waypoints[self.exploration_pattern_index]
             else:
                 self.last_position = (self.x, self.y)
                 self.last_stuck_check_time = current_time
 
         # Timeout
         if time_at_waypoint > self.waypoint_timeout:
-            self.get_logger().warn(f'⏱️ Waypoint {self.exploration_pattern_index} timeout! Skipping...')
+            self.get_logger().warn(f'⏱️ Waypoint {self.exploration_pattern_index + 1} timeout! Skipping...')
             self.exploration_pattern_index += 1
             self.waypoint_start_time = current_time
             self.last_position = (self.x, self.y)
             self.last_stuck_check_time = current_time
-            target = waypoints[self.exploration_pattern_index % total_wp]
 
-        # If reached waypoint
-        if dist < 0.3:  # Tolerance
+            if self.exploration_pattern_index < total_wp:
+                target = self.waypoints[self.exploration_pattern_index]
+
+        # If reached waypoint (0.35m tolerance)
+        if dist < 0.35:
             self.exploration_pattern_index += 1
             current_wp = self.exploration_pattern_index
             progress = (current_wp / total_wp) * 100
 
             self.waypoint_start_time = current_time
             self.last_position = (self.x, self.y)
+            self.last_stuck_check_time = current_time
 
-            self.get_logger().info(f'✅ Progress: {progress:.1f}% - Waypoint {current_wp}/{total_wp} at ({self.x:.2f}, {self.y:.2f})')
+            self.get_logger().info(f'✓ Waypoint {current_wp}/{total_wp} | Progress: {progress:.1f}%')
 
-            # Check if completed
-            if current_wp >= total_wp and not self.exploration_complete:
-                self.exploration_complete = True
-                self.get_logger().info('')
-                self.get_logger().info('='*60)
-                self.get_logger().info('🎉 ✅ EXPLORATION 100% COMPLETE!')
-                self.get_logger().info('='*60)
-                self.get_logger().info(f'Total waypoints: {total_wp}')
-                self.get_logger().info(f'Skipped waypoints: {self.stuck_counter}')
-                self.get_logger().info('📊 Generating results in 30 seconds...')
-                self.get_logger().info('='*60)
-
-                # Publish completion
-                status_msg = String()
-                status_msg.data = 'COMPLETE'
-                self.status_pub.publish(status_msg)
-
+            if self.exploration_pattern_index >= total_wp:
                 return 0.0, 0.0
 
-            target = waypoints[self.exploration_pattern_index % total_wp]
-
-        # If already complete, stay stopped
-        if self.exploration_complete:
-            return 0.0, 0.0
+            target = self.waypoints[self.exploration_pattern_index]
 
         # Log progress periodically
         if not hasattr(self, '_exploration_counter'):
             self._exploration_counter = 0
         self._exploration_counter += 1
-        if self._exploration_counter % 50 == 0:
-            self.get_logger().info(f'→ Waypoint {self.exploration_pattern_index % total_wp + 1}/{total_wp}: target={target}, dist={dist:.2f}m')
+        if self._exploration_counter % 100 == 0:
+            self.get_logger().info(f'→ Waypoint {self.exploration_pattern_index + 1}/{total_wp}: target={target}, dist={dist:.2f}m')
 
         # Compute control
         return self.compute_control_to_goal(target[0], target[1])
@@ -814,26 +808,28 @@ class SyntheticRobotNode(Node):
         Generate and publish laser scan.
 
         DEGRADED SENSOR:
-        - 240° FOV (±120°)
+        - 240° frontal FOV (realistic blind spots)
         - 4.0m max range
-        - 2cm noise
+        - 2cm Gaussian noise
         """
+        # Publish TF first to ensure frames are available
+        self.publish_tf()
+
         scan = LaserScan()
         scan.header.stamp = self.get_clock().now().to_msg()
-        scan.header.frame_id = 'base_footprint'
+        scan.header.frame_id = 'base_scan'
 
         scan.angle_min = self.angle_min      # -120°
         scan.angle_max = self.angle_max      # +120°
         scan.angle_increment = self.angle_increment
         scan.range_min = self.range_min
-        scan.range_max = self.range_max      # 4.0m
+        scan.range_max = self.range_max      # 4.0m (DEGRADED)
 
-        # Generate ranges
+        # Generate ranges using np.linspace for exact 628 rays
+        angles = np.linspace(self.angle_min, self.angle_max, 628)
         ranges = []
-        num_rays = int((self.angle_max - self.angle_min) / self.angle_increment)
 
-        for i in range(num_rays):
-            angle = self.angle_min + i * self.angle_increment
+        for angle in angles:
             world_angle = self.theta + angle
             distance = self.environment.raycast(self.x, self.y, world_angle, self.range_max)
             ranges.append(float(distance))

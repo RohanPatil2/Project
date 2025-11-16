@@ -1,5 +1,5 @@
 # SLAM Toolbox Configuration for Uncertainty-Aware SLAM
-# Optimized for 20m×20m environment with high-resolution mapping
+# Optimized for 20m×20m LARGE SIMPLE environment with REAL-TIME mapping
 
 slam_toolbox:
   ros__parameters:
@@ -20,46 +20,56 @@ slam_toolbox:
     use_map_saver: true
     mode: mapping
 
-    # RESOLUTION: 0.025m (2.5cm) for clear, detailed map
-    # This is 2x better than default 0.05m
-    resolution: 0.025
+    # RESOLUTION: 0.1m (10cm) for FAST mapping of large environment
+    # For 20m × 20m: 200×200 = 40,000 cells (optimal performance)
+    resolution: 0.1
 
-    # MAP SIZE: For 20m×20m environment
-    # At 0.025m resolution: 20m / 0.025m = 800 cells per side
-    # Total: 800×800 = 640,000 cells (manageable)
-    map_update_interval: 2.0
+    # MAP UPDATE: VERY FAST updates for immediate visibility
+    map_update_interval: 0.3  # Update every 0.3 seconds (3.3 Hz)
     map_start_pose: [0.0, 0.0, 0.0]
 
-    # Matching Parameters - Balanced for accuracy
-    minimum_travel_distance: 0.15
-    minimum_travel_heading: 0.15
-    scan_buffer_size: 20
-    scan_buffer_maximum_scan_distance: 15.0
-    link_match_minimum_response_fine: 0.45
-    link_scan_maximum_distance: 10.0
-    loop_search_maximum_distance: 4.0
+    # AGGRESSIVE matching for responsive mapping in large environment
+    minimum_travel_distance: 0.1  # Process scans frequently
+    minimum_travel_heading: 0.1   # Process rotation updates fast
+    scan_buffer_size: 40
+    scan_buffer_maximum_scan_distance: 10.0  # Match sensor max range (10m)
+    link_match_minimum_response_fine: 0.3  # Less strict for faster mapping
+    link_scan_maximum_distance: 10.0  # Match environment size (20m)
+    
+    # Loop closure - tuned for 20m environment
+    loop_search_maximum_distance: 8.0  # Larger for 20m environment
     do_loop_closing: true
-    loop_match_minimum_chain_size: 10
-    loop_match_maximum_variance_coarse: 3.0
-    loop_match_minimum_response_coarse: 0.35
-    loop_match_minimum_response_fine: 0.45
+    loop_match_minimum_chain_size: 8  # Less strict (was 10)
+    loop_match_maximum_variance_coarse: 3.5  # More permissive (was 3.0)
+    loop_match_minimum_response_coarse: 0.3  # Less strict (was 0.35)
+    loop_match_minimum_response_fine: 0.35  # Less strict (was 0.45)
 
-    # Correlation Parameters - Higher quality
-    correlation_search_space_dimension: 0.5
+    # Correlation Parameters - Faster search
+    correlation_search_space_dimension: 0.3  # Smaller search (was 0.5)
     correlation_search_space_resolution: 0.01
     correlation_search_space_smear_deviation: 0.1
 
-    # Loop Closure Parameters
-    loop_search_space_dimension: 8.0
+    # Loop Closure Parameters - Faster
+    loop_search_space_dimension: 6.0  # Smaller search (was 8.0)
     loop_search_space_resolution: 0.05
     loop_search_space_smear_deviation: 0.03
 
-    # Scan Matcher Parameters
-    distance_variance_penalty: 0.5
-    angle_variance_penalty: 1.0
+    # Scan Matcher Parameters - More responsive
+    distance_variance_penalty: 0.3  # Less penalty for faster matching (was 0.5)
+    angle_variance_penalty: 0.8  # Less penalty (was 1.0)
     fine_search_angle_offset: 0.00349
     coarse_search_angle_offset: 0.349
     coarse_angle_resolution: 0.0349
-    minimum_angle_penalty: 0.9
-    minimum_distance_penalty: 0.5
+    minimum_angle_penalty: 0.7  # Less strict (was 0.9)
+    minimum_distance_penalty: 0.3  # Less strict (was 0.5)
     use_response_expansion: true
+    
+    # Additional parameters for better map visibility in large environment
+    max_laser_range: 10.5  # Match upgraded sensor (10.0m + margin)
+    minimum_time_interval: 0.3  # Faster scan processing
+    transform_publish_period: 0.02  # 50Hz TF publishing
+    tf_buffer_duration: 30.0  # Keep TF history
+    
+    # Map quality parameters
+    minimum_map_update_frequency: 3.0  # Ensure map updates at least 3 Hz
+    stack_size_to_use: 40000000  # Increase stack size for processing
