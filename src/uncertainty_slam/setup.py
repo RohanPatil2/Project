@@ -36,6 +36,10 @@ setup(
             'ecs_logger = uncertainty_slam.ecs_logger:main',
             'synthetic_robot = uncertainty_slam.synthetic_robot:main',
             'results_generator = uncertainty_slam.results_generator:main',
+            'static_map_publisher = uncertainty_slam.static_map_publisher:main',
+            'stage_explorer = uncertainty_slam.stage_explorer:main',
+            'simple_test_robot = uncertainty_slam.simple_test_robot:main',
+            'final_heatmap_saver = uncertainty_slam.final_heatmap_saver:main',
         ],
     },
 )

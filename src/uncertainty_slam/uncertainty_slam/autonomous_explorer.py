@@ -28,10 +28,10 @@ class AutonomousExplorer(Node):
     def __init__(self):
         super().__init__('autonomous_explorer')
 
-        # Parameters
-        self.declare_parameter('linear_speed', 0.3)
-        self.declare_parameter('angular_speed', 0.5)
-        self.declare_parameter('goal_tolerance', 0.3)
+        # Parameters - REDUCED FOR SMOOTH, STABLE MOTION
+        self.declare_parameter('linear_speed', 0.15)  # Reduced from 0.3 to 0.15
+        self.declare_parameter('angular_speed', 0.3)  # Reduced from 0.5 to 0.3
+        self.declare_parameter('goal_tolerance', 0.4)  # Increased from 0.3 to 0.4
         self.declare_parameter('exploration_delay', 2.0)  # Seconds to wait at start
 
         self.linear_speed = self.get_parameter('linear_speed').value
@@ -299,20 +299,25 @@ class AutonomousExplorer(Node):
         # Create velocity command
         cmd = Twist()
 
-        # Proportional control
-        angular_gain = 2.0
-        linear_gain = 0.5
+        # SMOOTH Proportional control - reduced gains for stability
+        angular_gain = 1.0  # Reduced from 2.0 to 1.0
+        linear_gain = 0.3   # Reduced from 0.5 to 0.3
 
-        # Angular velocity
-        cmd.angular.z = angular_gain * angle_error
-        cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
+        # TURN-THEN-MOVE strategy (prevents glitching)
+        ANGLE_THRESHOLD = 0.3  # ~17 degrees - turn first if misaligned
 
-        # Linear velocity (reduce when turning)
-        if abs(angle_error) > 0.5:  # > ~30 degrees
-            cmd.linear.x = 0.0  # Rotate in place
+        if abs(angle_error) > ANGLE_THRESHOLD:
+            # STAGE 1: TURN IN PLACE
+            cmd.linear.x = 0.0  # NO forward motion while turning
+            cmd.angular.z = angular_gain * angle_error
+            cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
         else:
+            # STAGE 2: MOVE FORWARD
             cmd.linear.x = linear_gain * distance
             cmd.linear.x = max(0.0, min(self.linear_speed, cmd.linear.x))
+            # Small angular correction while moving
+            cmd.angular.z = angular_gain * angle_error * 0.5  # Reduced correction
+            cmd.angular.z = max(-self.angular_speed * 0.3, min(self.angular_speed * 0.3, cmd.angular.z))
 
         # Publish command
         self.cmd_vel_pub.publish(cmd)

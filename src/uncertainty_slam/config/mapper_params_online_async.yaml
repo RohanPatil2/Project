@@ -20,21 +20,21 @@ slam_toolbox:
     use_map_saver: true
     mode: mapping
 
-    # RESOLUTION: 0.1m (10cm) for FAST mapping of large environment
-    # For 20m × 20m: 200×200 = 40,000 cells (optimal performance)
-    resolution: 0.1
+    # RESOLUTION: 0.05m (5cm) for HIGH QUALITY mapping
+    # For 10m × 10m: 200×200 = 40,000 cells (good balance)
+    resolution: 0.05
 
     # MAP UPDATE: VERY FAST updates for immediate visibility
     map_update_interval: 0.3  # Update every 0.3 seconds (3.3 Hz)
     map_start_pose: [0.0, 0.0, 0.0]
 
-    # AGGRESSIVE matching for responsive mapping in large environment
-    minimum_travel_distance: 0.1  # Process scans frequently
-    minimum_travel_heading: 0.1   # Process rotation updates fast
-    scan_buffer_size: 40
-    scan_buffer_maximum_scan_distance: 10.0  # Match sensor max range (10m)
-    link_match_minimum_response_fine: 0.3  # Less strict for faster mapping
-    link_scan_maximum_distance: 10.0  # Match environment size (20m)
+    # SMOOTH matching for quality mapping with slower robot
+    minimum_travel_distance: 0.2  # Process scans less frequently for quality (was 0.1)
+    minimum_travel_heading: 0.15   # Process rotation updates conservatively (was 0.1)
+    scan_buffer_size: 50  # Larger buffer for better matching (was 40)
+    scan_buffer_maximum_scan_distance: 4.5  # Match sensor max range (4.0m + margin)
+    link_match_minimum_response_fine: 0.5  # More strict for quality (was 0.3)
+    link_scan_maximum_distance: 10.0  # Match environment size (10m)
     
     # Loop closure - tuned for 20m environment
     loop_search_maximum_distance: 8.0  # Larger for 20m environment
@@ -54,20 +54,20 @@ slam_toolbox:
     loop_search_space_resolution: 0.05
     loop_search_space_smear_deviation: 0.03
 
-    # Scan Matcher Parameters - More responsive
-    distance_variance_penalty: 0.3  # Less penalty for faster matching (was 0.5)
-    angle_variance_penalty: 0.8  # Less penalty (was 1.0)
+    # Scan Matcher Parameters - Quality focused
+    distance_variance_penalty: 0.5  # Standard penalty for quality (restored)
+    angle_variance_penalty: 1.0  # Standard penalty (restored)
     fine_search_angle_offset: 0.00349
     coarse_search_angle_offset: 0.349
     coarse_angle_resolution: 0.0349
-    minimum_angle_penalty: 0.7  # Less strict (was 0.9)
-    minimum_distance_penalty: 0.3  # Less strict (was 0.5)
+    minimum_angle_penalty: 0.9  # More strict for quality (restored)
+    minimum_distance_penalty: 0.5  # More strict for quality (restored)
     use_response_expansion: true
     
-    # Additional parameters for better map visibility in large environment
-    max_laser_range: 10.5  # Match upgraded sensor (10.0m + margin)
-    minimum_time_interval: 0.3  # Faster scan processing
-    transform_publish_period: 0.02  # 50Hz TF publishing
+    # Additional parameters for quality mapping with degraded sensor
+    max_laser_range: 4.2  # Match degraded sensor (4.0m + small margin)
+    minimum_time_interval: 0.5  # Slower scan processing for quality (was 0.3)
+    transform_publish_period: 0.05  # 20Hz TF publishing (was 0.02)
     tf_buffer_duration: 30.0  # Keep TF history
     
     # Map quality parameters

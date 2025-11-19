@@ -60,6 +60,11 @@ class UncertaintySLAMNode(Node):
         self.cell_sum = None  # Sum of observations
         self.cell_sum_sq = None  # Sum of squared observations
 
+        # NEW: Delta entropy tracking (for H_t - H_{t-10s})
+        self.previous_entropy = None  # Store entropy from 10 seconds ago
+        self.last_entropy_snapshot_time = None
+        self.delta_entropy_interval = 10.0  # seconds
+
         # CV Bridge for image conversion
         self.cv_bridge = CvBridge()
 
@@ -104,6 +109,13 @@ class UncertaintySLAMNode(Node):
             Float64,
             '/map_max_entropy',
             10
+        )
+
+        # NEW: Delta entropy publisher
+        self.delta_entropy_pub = self.create_publisher(
+            OccupancyGrid,
+            '/delta_entropy_map',
+            map_qos
         )
 
         # Timer for entropy computation and publishing
@@ -243,7 +255,12 @@ class UncertaintySLAMNode(Node):
 
     def _create_entropy_heatmap_image(self, entropy, width, height):
         """
-        Convert entropy array to a color heatmap image using cv2.applyColorMap.
+        Convert entropy array to a HIGH-CONTRAST color heatmap image.
+
+        IMPROVEMENTS:
+        - Gamma correction (0.5) for maximum mid-tone visibility
+        - JET colormap for maximum color distinctness
+        - Unknown cells handled properly (will show as RED)
 
         Args:
             entropy: 1D numpy array of entropy values [0, 1]
@@ -256,19 +273,41 @@ class UncertaintySLAMNode(Node):
         # Reshape to 2D grid
         entropy_2d = entropy.reshape((height, width))
 
-        # Normalize to 0-255 and convert to uint8
-        entropy_normalized = np.clip(entropy_2d * 255.0, 0, 255).astype(np.uint8)
+        # CRITICAL: Handle unknown cells properly
+        # Check if we have access to current_map to identify unknown cells
+        if self.current_map is not None:
+            map_data = np.array(self.current_map.data, dtype=np.int8).reshape((height, width))
+            unknown_mask = (map_data == -1)
 
-        # Apply JET colormap (blue=low, red=high)
-        # Note: OpenCV uses BGR format
+            # Set unknown cells to MAXIMUM entropy (1.0 = RED)
+            entropy_2d[unknown_mask] = 1.0
+
+        # Apply gamma correction for HIGH-CONTRAST mid-tone visibility
+        # Gamma = 0.5 brightens mid-tones significantly (makes Green/Yellow VIVID)
+        gamma = 0.5  # More aggressive than before (was 0.7)
+        entropy_enhanced = np.power(entropy_2d, gamma)
+
+        # Normalize to 0-255 and convert to uint8
+        entropy_normalized = np.clip(entropy_enhanced * 255.0, 0, 255).astype(np.uint8)
+
+        # Apply JET colormap (Blue-Cyan-Green-Yellow-Red)
+        # JET provides maximum color distinctness for gradient visualization
         entropy_color = cv2.applyColorMap(entropy_normalized, cv2.COLORMAP_JET)
 
         # Convert BGR to RGB for proper RViz display
         entropy_color_rgb = cv2.cvtColor(entropy_color, cv2.COLOR_BGR2RGB)
 
+        # Upscale for better visibility (4x larger)
+        scale_factor = 4
+        entropy_upscaled = cv2.resize(
+            entropy_color_rgb,
+            (width * scale_factor, height * scale_factor),
+            interpolation=cv2.INTER_NEAREST  # Preserve sharp edges
+        )
+
         # Convert to ROS Image message
         try:
-            image_msg = self.cv_bridge.cv2_to_imgmsg(entropy_color_rgb, encoding='rgb8')
+            image_msg = self.cv_bridge.cv2_to_imgmsg(entropy_upscaled, encoding='rgb8')
             image_msg.header.stamp = self.get_clock().now().to_msg()
             image_msg.header.frame_id = 'map'
             return image_msg
@@ -335,6 +374,9 @@ class UncertaintySLAMNode(Node):
             max_entropy_msg.data = float(np.max(entropy[valid_cells]))
             self.max_entropy_pub.publish(max_entropy_msg)
 
+            # NEW: Compute and publish delta entropy (H_{t-10s} - H_t)
+            self._compute_and_publish_delta_entropy(entropy, width, height)
+
             # Log statistics periodically
             if hasattr(self, '_log_counter'):
                 self._log_counter += 1
@@ -347,6 +389,60 @@ class UncertaintySLAMNode(Node):
                     f'Max: {max_entropy_msg.data:.4f} bits, '
                     f'Valid cells: {np.sum(valid_cells)}'
                 )
+
+    def _compute_and_publish_delta_entropy(self, current_entropy, width, height):
+        """
+        Compute and publish delta entropy map: ΔH = H_{t-10s} - H_t.
+
+        Positive values (green/cyan): Uncertainty reduced (successful learning)
+        Zero values (black): No change
+        Negative values (red/yellow): Uncertainty increased (mapping failure)
+
+        Args:
+            current_entropy: Current entropy values [0, 1]
+            width: Map width
+            height: Map height
+        """
+        current_time = self.get_clock().now().nanoseconds / 1e9
+
+        # Initialize timestamp on first call
+        if self.last_entropy_snapshot_time is None:
+            self.last_entropy_snapshot_time = current_time
+            self.previous_entropy = current_entropy.copy()
+            return
+
+        # Check if 10 seconds have elapsed
+        time_since_snapshot = current_time - self.last_entropy_snapshot_time
+
+        if time_since_snapshot >= self.delta_entropy_interval:
+            # Compute delta: H_{t-10s} - H_t
+            # Positive = uncertainty reduced
+            # Negative = uncertainty increased
+            delta_entropy = self.previous_entropy - current_entropy
+
+            # Create delta entropy message
+            delta_msg = OccupancyGrid()
+            delta_msg.header = self.current_map.header
+            delta_msg.header.stamp = self.get_clock().now().to_msg()
+            delta_msg.info = self.current_map.info
+
+            # Scale delta to [-100, +100] for visualization
+            # Positive: 0-100 (uncertainty reduced)
+            # Negative: -100-0 (uncertainty increased)
+            scaled_delta = np.clip(delta_entropy * 200.0 - 100.0, -100, 100).astype(np.int8)
+            delta_msg.data = scaled_delta.tolist()
+
+            # Publish
+            self.delta_entropy_pub.publish(delta_msg)
+
+            # Update snapshot
+            self.previous_entropy = current_entropy.copy()
+            self.last_entropy_snapshot_time = current_time
+
+            self.get_logger().info(
+                f'Delta entropy published: '
+                f'Avg reduction: {np.mean(delta_entropy):.4f} bits'
+            )
 
 
 def main(args=None):
