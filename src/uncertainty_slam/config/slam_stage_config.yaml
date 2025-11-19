@@ -1,0 +1,77 @@
+# SLAM Toolbox Configuration for Stage Simulator
+# OPTIMIZED FOR STABLE, HIGH-QUALITY MAPPING
+
+slam_toolbox:
+  ros__parameters:
+
+    # Solver Configuration
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # Frame Configuration
+    odom_frame: robot_0/odom
+    map_frame: map
+    base_frame: robot_0/base_footprint
+    scan_topic: /robot_0/base_scan
+    use_map_saver: true
+    mode: mapping
+
+    # Map Resolution - HIGH QUALITY
+    # 0.05m = 5cm resolution for clean, detailed maps
+    resolution: 0.05
+
+    # Map Update - Moderate rate for quality
+    map_update_interval: 0.5  # 2 Hz - smooth updates
+    map_start_pose: [-6.0, -6.0, 0.0]
+
+    # Scan Processing - CONSERVATIVE for quality
+    # Process scans only after significant movement
+    minimum_travel_distance: 0.3  # 30cm - wait for clear movement
+    minimum_travel_heading: 0.2   # ~11 degrees - clear rotation
+    scan_buffer_size: 100         # Large buffer for best matching
+    scan_buffer_maximum_scan_distance: 8.5  # Match sensor range
+    link_match_minimum_response_fine: 0.6  # STRICT - high quality only
+    link_scan_maximum_distance: 16.0  # Environment size
+
+    # Loop Closure - Conservative but effective
+    loop_search_maximum_distance: 5.0  # Look for loops within 5m
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10  # Require good chain
+    loop_match_maximum_variance_coarse: 2.0  # Strict variance
+    loop_match_minimum_response_coarse: 0.5  # High threshold
+    loop_match_minimum_response_fine: 0.6   # High threshold
+
+    # Correlation Search - Precise matching
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # Loop Search - Moderate range
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # Scan Matcher - QUALITY FOCUSED
+    distance_variance_penalty: 0.7  # High penalty for distance mismatch
+    angle_variance_penalty: 1.2     # High penalty for angle mismatch
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+
+    # Sensor Configuration - Match Stage sensor
+    max_laser_range: 8.0  # Match Stage sensor (270 deg, 8m range)
+    minimum_time_interval: 0.5  # Process scans conservatively
+    transform_publish_period: 0.05  # 20Hz TF
+    tf_buffer_duration: 30.0
+
+    # Map Quality
+    minimum_map_update_frequency: 2.0  # At least 2 Hz
+    stack_size_to_use: 40000000
+
